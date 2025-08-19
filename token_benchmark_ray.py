@@ -18,8 +18,8 @@ from llmperf.requests_launcher import RequestsLauncher
 from llmperf.utils import (  # randomly_sample_sonnet_lines_prompt,
     LLMPerfResults,
     get_accuracy,
-    get_messages_from_dataset_files,
-    get_messages_from_multi_turn_dataset_files,
+    # get_messages_from_dataset_files,
+    # get_messages_from_multi_turn_dataset_files,
     get_prompts_from_dataset_files,
     sample_random_positive_int,
 )
@@ -28,9 +28,9 @@ from transformers import AutoTokenizer, LlamaTokenizerFast
 
 
 def get_token_throughput_latencies(
-    round: int,
-    past_llm_output: str,
-    past_message: Tuple[List[Dict], int],
+    # round: int,
+    # past_llm_output: str,
+    # past_message: Tuple[List[Dict], int],
     model: str,
     model_path: str,
     mean_input_tokens: int,
@@ -69,7 +69,7 @@ def get_token_throughput_latencies(
         (e.g. throughput, latencies, etc.)
         The individual metrics for each request.
     """
-    random.seed(11111)
+    # random.seed(11111)
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     get_token_length = lambda text: len(tokenizer.encode(text))
@@ -82,7 +82,8 @@ def get_token_throughput_latencies(
     num_completed_requests = 0
 
     num_output_tokens_list = []
-    messages = []
+    # messages = []
+    prompts = []
 
     # for i in range(max_num_completed_requests):
     #     num_output_tokens = (sample_random_positive_int(
@@ -97,30 +98,30 @@ def get_token_throughput_latencies(
     #         tokenizer=tokenizer
     #     ))
 
-    if scenario == "doc-qa":
-        messages, num_output_tokens_list, ground_truths_list, questions_list = (
-            get_messages_from_dataset_files(
-                dataset_file_names=dataset_file_names,
-                tokenizer=tokenizer,
-                mean_output_tokens=mean_output_tokens,
-                stddev_output_tokens=stddev_output_tokens,
-                context_length=context_length,
-                delimiter=delimiter,
-                use_delimiter=use_delimiter,
-            )
-        )
-    else:
-        messages, num_output_tokens_list = get_messages_from_multi_turn_dataset_files(
-            round=round,
-            past_llm_output=past_llm_output,
-            past_message=past_message,
+    # if scenario == "doc-qa":
+    prompts, num_output_tokens_list, ground_truths_list, questions_list = (
+        get_prompts_from_dataset_files(
             dataset_file_names=dataset_file_names,
             tokenizer=tokenizer,
             mean_output_tokens=mean_output_tokens,
             stddev_output_tokens=stddev_output_tokens,
+            context_length=context_length,
+            delimiter=delimiter,
+            use_delimiter=use_delimiter,
         )
+    )
+    # else:
+    #     prompts, num_output_tokens_list = get_messages_from_multi_turn_dataset_files(
+    #         round=round,
+    #         past_llm_output=past_llm_output,
+    #         past_message=past_message,
+    #         dataset_file_names=dataset_file_names,
+    #         tokenizer=tokenizer,
+    #         mean_output_tokens=mean_output_tokens,
+    #         stddev_output_tokens=stddev_output_tokens,
+    #     )
 
-    max_num_completed_requests = len(messages)
+    max_num_completed_requests = len(prompts)
 
     start_time = time.monotonic()
     pbar = tqdm(total=max_num_completed_requests)
@@ -144,8 +145,8 @@ def get_token_throughput_latencies(
             default_sampling_params.update(additional_sampling_params)
             request_config = RequestConfig(
                 model=model,
-                # prompt=prompts[request_index],
-                message=messages[request_index],
+                prompt=prompts[request_index],
+                # message=messages[request_index],
                 sampling_params=default_sampling_params,
                 llm_api=llm_api,
             )
@@ -155,6 +156,7 @@ def get_token_throughput_latencies(
             all_metrics = []
             for out in outs:
                 request_metrics, gen_text, _ = out
+                # print(f"gen_text: {gen_text}")
                 llm_outputs.append(gen_text)
                 num_output_tokens = get_token_length(gen_text)
                 with completed_requests_lock:
@@ -244,7 +246,7 @@ def get_token_throughput_latencies(
 
     metadata["results"] = ret
 
-    return metadata, completed_requests, messages, llm_outputs
+    return metadata, completed_requests, prompts, llm_outputs
 
 
 def metrics_summary(
@@ -409,81 +411,81 @@ def run_token_benchmark(
             " because of the prompting logic right now"
         )
 
-    llm_outputs = [""]
-    messages = [([], 0)]
+    # llm_outputs = [""]
+    # prompts = [([], 0)]
 
-    rounds = []
+    # rounds = []
     ttft_means = []
 
     if scenario == "doc-qa":
         max_round = 1
 
-    for rnd in range(max_round):
-        summary, individual_responses, messages, llm_outputs = (
-            get_token_throughput_latencies(
-                round=rnd,
-                past_llm_output=llm_outputs[0],
-                past_message=messages[0],
-                model=model,
-                model_path=model_path,
-                llm_api=llm_api,
-                test_timeout_s=test_timeout_s,
-                max_num_completed_requests=max_num_completed_requests,
-                mean_input_tokens=mean_input_tokens,
-                stddev_input_tokens=stddev_input_tokens,
-                mean_output_tokens=mean_output_tokens,
-                stddev_output_tokens=stddev_output_tokens,
-                num_concurrent_requests=num_concurrent_requests,
-                additional_sampling_params=json.loads(additional_sampling_params),
-                dataset_file_names=dataset_file_names,
-                scenario=scenario,
-                context_length=context_length,
-                delimiter=delimiter,
-                use_delimiter=use_delimiter,
-            )
+    # for rnd in range(max_round):
+    summary, individual_responses, prompts, llm_outputs = (
+        get_token_throughput_latencies(
+            # round=rnd,
+            # past_llm_output=llm_outputs[0],
+            # past_message=prompts[0],
+            model=model,
+            model_path=model_path,
+            llm_api=llm_api,
+            test_timeout_s=test_timeout_s,
+            max_num_completed_requests=max_num_completed_requests,
+            mean_input_tokens=mean_input_tokens,
+            stddev_input_tokens=stddev_input_tokens,
+            mean_output_tokens=mean_output_tokens,
+            stddev_output_tokens=stddev_output_tokens,
+            num_concurrent_requests=num_concurrent_requests,
+            additional_sampling_params=json.loads(additional_sampling_params),
+            dataset_file_names=dataset_file_names,
+            scenario=scenario,
+            context_length=context_length,
+            delimiter=delimiter,
+            use_delimiter=use_delimiter,
         )
-        rounds.append(rnd)
-        ttft_means.append(summary["results"][common_metrics.TTFT]["mean"])
+    )
+    # rounds.append(rnd)
+    ttft_means.append(summary["results"][common_metrics.TTFT]["mean"])
 
-    if scenario == "doc-qa":
-        result_to_save = [{"mean ttft": ttft_means[0]}]
-        with open(
-            results_dir
-            + "/docqa_TTFT_"
-            + str(context_length)
-            + "k_"
-            + os.path.basename(model_path)
-            + "_"
-            + connector
-            + "_connector_"
-            + device
-            + ".jsonl",
-            "a",
-            encoding="utf-8",
-        ) as file:
-            json.dump(result_to_save, file, ensure_ascii=False)
-            file.write("\n")
+    # if scenario == "doc-qa":
+    result_to_save = [{"mean ttft": ttft_means[0]}]
+    with open(
+        results_dir
+        + "/docqa_TTFT_"
+        + str(context_length)
+        + "k_"
+        + os.path.basename(model_path)
+        + "_"
+        + connector
+        + "_connector_"
+        + device
+        + ".jsonl",
+        "a",
+        encoding="utf-8",
+    ) as file:
+        json.dump(result_to_save, file, ensure_ascii=False)
+        file.write("\n")
 
-    if scenario == "multi-turn-dialogue":
+    # if scenario == "multi-turn-dialogue":
 
-        import matplotlib.pyplot as plt
+    #     import matplotlib.pyplot as plt
 
-        plt.plot(rounds, ttft_means, marker="o")
-        plt.title("TTFT_curve_multi_turn_dialogue")
-        plt.xlabel("round")
-        plt.ylabel("TTFT")
-        plt.grid(True)
-        plt.legend(["stub_12_0802"])
-        plt.savefig(
-            results_dir
-            + "/multi_turn_dialogue_TTFT_"
-            + os.path.basename(model_path)
-            + "_"
-            + connector
-            + "_connector_"
-            + device
-            + ".png"
-        )
+    #     plt.plot(rounds, ttft_means, marker="o")
+    #     plt.title("TTFT_curve_multi_turn_dialogue")
+    #     plt.xlabel("round")
+    #     plt.ylabel("TTFT")
+    #     plt.grid(True)
+    #     plt.legend(["stub_12_0802"])
+    #     plt.savefig(
+    #         results_dir
+    #         + "/multi_turn_dialogue_TTFT_"
+    #         + os.path.basename(model_path)
+    #         + "_"
+    #         + connector
+    #         + "_connector_"
+    #         + device
+    #         + ".png"
+    #     )
 
 
 args = argparse.ArgumentParser(

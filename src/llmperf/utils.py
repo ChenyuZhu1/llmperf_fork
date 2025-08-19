@@ -147,74 +147,33 @@ def flatten_dict(d, parent_key="", sep="_"):
     return dict(items)
 
 
-def random_string():
-    current_time = datetime.now()
-    formatted_time = current_time.strftime("%Y-%m-%d %H:%M:%S")
-    return "The current time is " + formatted_time + "."
-
-
-def transfer_context_with_delimiter(context: str, delimiter: str, use_delimiter: bool):
+def context_string_to_token_id_list(context: str, delimiter: str, use_delimiter: bool, tokenizer):
     if not use_delimiter:
-        return context
+        return tokenizer.encode(context)[1:]
     # use delimiter
     import re
-
     passages = re.split(r"(Passage \d+:\n)", context)
     passages = [p for p in passages if p.strip()]
-    result = []
+    random.shuffle(passages)
+    result = tokenizer.encode(delimiter)[1:]
     for passage in passages:
-        if passage.startswith("Passage"):
-            result.append(delimiter + passage)
-        else:
-            result.append(passage)
-    result.append(delimiter)
-    return random_string() + "".join(result)
+        result += tokenizer.encode(passage)[1:]
+        result += tokenizer.encode(delimiter)[1:]
+    return result
 
 
 def get_prompts_from_dataset_files(
-    dataset_file_names, tokenizer, mean_output_tokens=500, stddev_output_tokens=100
-):
-    get_token_length = lambda text: len(tokenizer.encode(text))
-    dataset_file_name_list = dataset_file_names.split(",")
-    prompts = []
-    num_output_tokens_list = []
-    for dataset_file in dataset_file_name_list:
-        local_prompts_file_path = pathlib.Path(__file__).parent.resolve() / dataset_file
-        with open(local_prompts_file_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        data = json.loads(line)
-                        prompt = (
-                            data["context"]
-                            + " Please answer the following question according to the passage above. The question is: "
-                            + data["input"]
-                        )
-                        prompts.append((prompt, get_token_length(prompt)))
-                        num_output_tokens_list.append(
-                            sample_random_positive_int(
-                                mean_output_tokens, stddev_output_tokens
-                            )
-                        )
-                    except json.JsonDecodeError as e:
-                        print(f"Error decoding JSON: {e}")
-
-    return prompts, num_output_tokens_list
-
-
-def get_messages_from_dataset_files(
     dataset_file_names,
     tokenizer,
     mean_output_tokens=500,
     stddev_output_tokens=100,
     context_length=4,
     delimiter=" # # ",
-    use_delimiter=False,
+    use_delimiter=False
 ):
-    get_token_length = lambda text: len(tokenizer.encode(text))
+    get_token_ids_list = lambda text: tokenizer.encode(text)
     dataset_file_name_list = [str(context_length) + "k.jsonl"]
-    messages = []
+    prompts = []
     num_output_tokens_list = []
     ground_truths_list = []
     questions_list = []
@@ -227,20 +186,10 @@ def get_messages_from_dataset_files(
                     try:
                         data = json.loads(line)
                         if not use_delimiter or data["context"].startswith("Passage "):
-                            prompt = (
-                                transfer_context_with_delimiter(
-                                    context=data["context"],
-                                    delimiter=delimiter,
-                                    use_delimiter=use_delimiter,
-                                )
-                                + " Please answer the following question according to the passages above. The question is: "
-                                + data["input"]
-                            )
-                            message = [
-                                # {"role": "system", "content": ""},
-                                {"role": "user", "content": prompt},
-                            ]
-                            messages.append((message, get_token_length(prompt)))
+                            context_token_ids = context_string_to_token_id_list(context=data["context"], delimiter=delimiter, use_delimiter=use_delimiter, tokenizer=tokenizer)
+                            suffix_token_ids = get_token_ids_list(" Please answer the following question according to the passage above. The question is: " + data["input"])
+                            prompt_token_ids = context_token_ids + suffix_token_ids
+                            prompts.append((prompt_token_ids, len(prompt_token_ids)))
                             num_output_tokens_list.append(
                                 sample_random_positive_int(
                                     mean_output_tokens, stddev_output_tokens
@@ -248,61 +197,116 @@ def get_messages_from_dataset_files(
                             )
                             ground_truths_list.append(data["answers"])
                             questions_list.append(data["input"])
-                            if len(messages) >= MAX_NUM_OF_REQUESTS_PER_INPUT_LENGTH:
+                            if len(prompts) >= MAX_NUM_OF_REQUESTS_PER_INPUT_LENGTH:
                                 break
                         else:
                             continue
-                    except json.JSONDecodeError as e:
-                        print(f"Error decoding json: {e}")
+                    except json.JsonDecodeError as e:
+                        print(f"Error decoding JSON: {e}")
 
-    return messages, num_output_tokens_list, ground_truths_list, questions_list
-
-
-def read_txt_line(file_path, line_number):
-    if line_number < 0:
-        raise ValueError("line number must start at 0")
-    with open(file_path, "r", encoding="utf-8") as file:
-        current_line = 0
-        for line in file:
-            if current_line == line_number:
-                return line.strip()
-            current_line += 1
-    raise ValueError(f"The {line_number}^th line does not exist in file {file_path}")
+    return prompts, num_output_tokens_list, ground_truths_list, questions_list
 
 
-def get_messages_from_multi_turn_dataset_files(
-    round,
-    past_llm_output,
-    past_message,
-    dataset_file_names,
-    tokenizer,
-    mean_output_tokens=500,
-    stddev_output_tokens=100,
-):
-    get_token_length = lambda text: len(tokenizer.decode(text))
-    dataset_file_name_list = dataset_file_names.split(",")
-    messages = []
-    num_output_tokens_list = []
-    for dataset_file in dataset_file_name_list:
-        local_prompts_file_path = pathlib.Path(__file__).parent.resolve() / dataset_file
-        past_inputs = past_message[0]
-        past_len = past_message[1]
-        past_inputs.append({"role": "system", "content": past_llm_output})
-        next_user_input = read_txt_line(local_prompts_file_path, round)
-        past_inputs.append({"role": "user", "content": next_user_input})
-        messages.append(
-            (
-                past_inputs,
-                past_len
-                + get_token_length(past_llm_output)
-                + get_token_length(next_user_input),
-            )
-        )
-        num_output_tokens_list.append(
-            sample_random_positive_int(mean_output_tokens, stddev_output_tokens)
-        )
+# def get_messages_from_dataset_files(
+#     dataset_file_names,
+#     tokenizer,
+#     mean_output_tokens=500,
+#     stddev_output_tokens=100,
+#     context_length=4,
+#     delimiter=" # # ",
+#     use_delimiter=False,
+# ):
+#     get_token_length = lambda text: len(tokenizer.encode(text))
+#     dataset_file_name_list = [str(context_length) + "k.jsonl"]
+#     messages = []
+#     num_output_tokens_list = []
+#     ground_truths_list = []
+#     questions_list = []
+#     for dataset_file in dataset_file_name_list:
+#         local_prompts_file_path = pathlib.Path(__file__).parent.resolve() / dataset_file
+#         with open(local_prompts_file_path, "r", encoding="utf-8") as f:
+#             for line in f:
+#                 line = line.strip()
+#                 if line:
+#                     try:
+#                         data = json.loads(line)
+#                         if not use_delimiter or data["context"].startswith("Passage "):
+#                             prompt = (
+#                                 transfer_context_with_delimiter(
+#                                     context=data["context"],
+#                                     delimiter=delimiter,
+#                                     use_delimiter=use_delimiter,
+#                                 )
+#                                 + " Please answer the following question according to the passages above. The question is: "
+#                                 + data["input"]
+#                             )
+#                             message = [
+#                                 # {"role": "system", "content": ""},
+#                                 {"role": "user", "content": prompt},
+#                             ]
+#                             messages.append((message, get_token_length(prompt)))
+#                             num_output_tokens_list.append(
+#                                 sample_random_positive_int(
+#                                     mean_output_tokens, stddev_output_tokens
+#                                 )
+#                             )
+#                             ground_truths_list.append(data["answers"])
+#                             questions_list.append(data["input"])
+#                             if len(messages) >= MAX_NUM_OF_REQUESTS_PER_INPUT_LENGTH:
+#                                 break
+#                         else:
+#                             continue
+#                     except json.JSONDecodeError as e:
+#                         print(f"Error decoding json: {e}")
 
-    return messages, num_output_tokens_list
+#     return messages, num_output_tokens_list, ground_truths_list, questions_list
+
+
+# def read_txt_line(file_path, line_number):
+#     if line_number < 0:
+#         raise ValueError("line number must start at 0")
+#     with open(file_path, "r", encoding="utf-8") as file:
+#         current_line = 0
+#         for line in file:
+#             if current_line == line_number:
+#                 return line.strip()
+#             current_line += 1
+#     raise ValueError(f"The {line_number}^th line does not exist in file {file_path}")
+
+
+# def get_messages_from_multi_turn_dataset_files(
+#     round,
+#     past_llm_output,
+#     past_message,
+#     dataset_file_names,
+#     tokenizer,
+#     mean_output_tokens=500,
+#     stddev_output_tokens=100,
+# ):
+#     get_token_length = lambda text: len(tokenizer.decode(text))
+#     dataset_file_name_list = dataset_file_names.split(",")
+#     messages = []
+#     num_output_tokens_list = []
+#     for dataset_file in dataset_file_name_list:
+#         local_prompts_file_path = pathlib.Path(__file__).parent.resolve() / dataset_file
+#         past_inputs = past_message[0]
+#         past_len = past_message[1]
+#         past_inputs.append({"role": "system", "content": past_llm_output})
+#         next_user_input = read_txt_line(local_prompts_file_path, round)
+#         past_inputs.append({"role": "user", "content": next_user_input})
+#         messages.append(
+#             (
+#                 past_inputs,
+#                 past_len
+#                 + get_token_length(past_llm_output)
+#                 + get_token_length(next_user_input),
+#             )
+#         )
+#         num_output_tokens_list.append(
+#             sample_random_positive_int(mean_output_tokens, stddev_output_tokens)
+#         )
+
+#     return messages, num_output_tokens_list
 
 
 def get_accuracy(
