@@ -6,6 +6,8 @@ import subprocess
 import time
 from datetime import datetime
 from typing import Any, Dict, Tuple
+import os
+import requests
 
 from transformers import AutoTokenizer, LlamaTokenizerFast
 
@@ -154,9 +156,13 @@ def context_string_to_token_id_list(context: str, delimiter: str, use_delimiter:
     import re
     passages = re.split(r"(Passage \d+:\n)", context)
     passages = [p for p in passages if p.strip()]
-    random.shuffle(passages)
+    all_passages = []
+    for i in range(len(passages)):
+        if i % 2 == 0:
+            all_passages.append(passages[i] + passages[i + 1])
+    random.shuffle(all_passages)
     result = tokenizer.encode(delimiter)[1:]
-    for passage in passages:
+    for passage in all_passages:
         result += tokenizer.encode(passage)[1:]
         result += tokenizer.encode(delimiter)[1:]
     return result
@@ -169,7 +175,8 @@ def get_prompts_from_dataset_files(
     stddev_output_tokens=100,
     context_length=4,
     delimiter=" # # ",
-    use_delimiter=False
+    use_delimiter=False,
+    is_dump=True,
 ):
     get_token_ids_list = lambda text: tokenizer.encode(text)
     dataset_file_name_list = [str(context_length) + "k.jsonl"]
@@ -187,7 +194,7 @@ def get_prompts_from_dataset_files(
                         data = json.loads(line)
                         if not use_delimiter or data["context"].startswith("Passage "):
                             context_token_ids = context_string_to_token_id_list(context=data["context"], delimiter=delimiter, use_delimiter=use_delimiter, tokenizer=tokenizer)
-                            suffix_token_ids = get_token_ids_list(" Please answer the following question according to the passage above. The question is: " + data["input"])
+                            suffix_token_ids = get_token_ids_list(" Please answer the following question according to the passage above. The question is: " + data["input"]) if not is_dump else []
                             prompt_token_ids = context_token_ids + suffix_token_ids
                             prompts.append((prompt_token_ids, len(prompt_token_ids)))
                             num_output_tokens_list.append(
@@ -310,7 +317,29 @@ def get_prompts_from_dataset_files(
 
 
 def get_accuracy(
-    questions: list[str], ground_truths: list[list[str]], llm_outputs: list[str]
+    questions: list[str], ground_truths: list[list[str]], llm_outputs: list[str], model_alias: str
 ):
-    # temporarily stubbed for further implementation, maybe call LLM
+    address = os.environ.get("OPENAI_API_BASE")
+    if not address:
+        raise ValueError("the environment variable OPENAI_API_BASE must be set.")
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        raise ValueError("the environment variable OPENAI_API_KEY must be set.")
+    headers = {"Authorization": f"Bearer {key}"}
+    if not address:
+        raise ValueError("No host provided.")
+    if not address.endswith("/"):
+        address = address + "/"
+    address += "chat/completions"
+    for question, ground_truth_list, llm_output in zip(questions, ground_truths, llm_outputs):
+        content = ("Now you need to evaluate the degree of relevance of the <predicted_answer> and the <annotated_answer> to the <question>, and then give an integer between 0 and 100. 0 implies that <predicted_answer> is completely unrelated to <annotated_answer>, and 100 implies that these two are completely related. \n"
+                    "Please give your output in JSON format. Only include 'score' as the key, together with an integer between 0 and 100. Please give your output in the format {'score': xxx}, and DON'T give any other information. \n"
+                    f"The question is: {question}, <annotated_answer> is: {ground_truth_list[0]}, and <predicted_answer> is: {llm_output}")
+        messages = [{"role": "user", "content": content}]
+        data = {"model": model_alias, "messages": messages}
+        # response = requests.post(address, json=data, headers=headers)
+        # response.raise_for_status()
+        # content_str = response.json()["choices"][0]["message"]["content"]
+
+        # TODO: post-process <content_str> and calculate mean accuracy
     return 0.5

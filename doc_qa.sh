@@ -99,8 +99,8 @@ for length in "${lengths[@]}"; do
         python_command="$python_command --use-delimiter --delimiter \"${delimiter}\""
     fi
 
-    eval $python_command
-    eval $python_command
+    eval "${python_command} --is-dump"
+    eval "${python_command}"
 
     echo "TTFT results with length ${length}k have been saved into file $doc_qa_result_file_path"
 

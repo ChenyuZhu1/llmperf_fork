@@ -47,6 +47,7 @@ def get_token_throughput_latencies(
     context_length=4,
     delimiter: str = " # # ",
     use_delimiter: bool = False,
+    is_dump: bool = True,
 ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     """Get the token throughput and latencies for the given model.
 
@@ -108,6 +109,7 @@ def get_token_throughput_latencies(
             context_length=context_length,
             delimiter=delimiter,
             use_delimiter=use_delimiter,
+            is_dump=is_dump,
         )
     )
     # else:
@@ -232,6 +234,7 @@ def get_token_throughput_latencies(
         llm_outputs,
         ground_truths_list,
         questions_list,
+        model_alias=model,
     )
 
     metadata = {
@@ -256,6 +259,7 @@ def metrics_summary(
     llm_outputs: list[str],
     ground_truths_list: list[list[str]],
     questions_list: list[str],
+    model_alias: str,
 ) -> Dict[str, Any]:
     """Generate a summary over metrics generated from potentially multiple instances of this client.
 
@@ -359,6 +363,7 @@ def metrics_summary(
         questions=questions_list,
         ground_truths=ground_truths_list,
         llm_outputs=llm_outputs,
+        model_alias=model_alias,
     )
     print(f"Mean accuracy: {ret[common_metrics.ACCURACY]}")
 
@@ -387,6 +392,7 @@ def run_token_benchmark(
     device: str,
     delimiter: str,
     use_delimiter: bool,
+    is_dump: bool,
 ):
     """
     Args:
@@ -442,6 +448,7 @@ def run_token_benchmark(
             context_length=context_length,
             delimiter=delimiter,
             use_delimiter=use_delimiter,
+            is_dump=is_dump,
         )
     )
     # rounds.append(rnd)
@@ -650,6 +657,12 @@ args.add_argument(
     ),
 )
 
+args.add_argument(
+    "--is-dump",
+    action="store_true",
+    help=("Whether just for dumping KVCache. ")
+)
+
 if __name__ == "__main__":
     env_vars = dict(os.environ)
     ray.init(runtime_env={"env_vars": env_vars})
@@ -686,4 +699,5 @@ if __name__ == "__main__":
         device=args.device,
         delimiter=args.delimiter,
         use_delimiter=args.use_delimiter,
+        is_dump=args.is_dump,
     )
